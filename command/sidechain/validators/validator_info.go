@@ -74,12 +74,13 @@ func runCommand(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("failed to get validator info for %s: %w", validatorAddr, err)
 	}
 
+	// Use String() to preserve the complete big.Int representation and avoid truncation.
 	outputter.WriteCommandResult(&validatorsInfoResult{
 		address:             validatorInfo.Address.String(),
-		stake:               validatorInfo.Stake.Uint64(),
-		totalStake:          validatorInfo.TotalStake.Uint64(),
-		commission:          validatorInfo.Commission.Uint64(),
-		withdrawableRewards: validatorInfo.WithdrawableRewards.Uint64(),
+		stake:               validatorInfo.Stake.String(),
+		totalStake:          validatorInfo.TotalStake.String(),
+		commission:          validatorInfo.Commission.String(),
+		withdrawableRewards: validatorInfo.WithdrawableRewards.String(),
 		active:              validatorInfo.Active,
 	})
 

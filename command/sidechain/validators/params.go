@@ -18,12 +18,13 @@ func (v *validatorInfoParams) validateFlags() error {
 	return sidechainHelper.ValidateSecretFlags(v.accountDir, v.accountConfig)
 }
 
+// Change to string type to retain arbitrary precision numerical representation (to avoid big.Int being truncated by Uint64).
 type validatorsInfoResult struct {
 	address             string
-	stake               uint64
-	totalStake          uint64
-	commission          uint64
-	withdrawableRewards uint64
+	stake               string
+	totalStake          string
+	commission          string
+	withdrawableRewards string
 	active              bool
 }
 
@@ -32,12 +33,12 @@ func (vr validatorsInfoResult) GetOutput() string {
 
 	buffer.WriteString("\n[VALIDATOR INFO]\n")
 
-	vals := make([]string, 0, 5)
+	vals := make([]string, 0, 6)
 	vals = append(vals, fmt.Sprintf("Validator Address|%s", vr.address))
-	vals = append(vals, fmt.Sprintf("Self Stake|%v", vr.stake))
-	vals = append(vals, fmt.Sprintf("Total Stake|%v", vr.totalStake))
-	vals = append(vals, fmt.Sprintf("Withdrawable Rewards|%v", vr.withdrawableRewards))
-	vals = append(vals, fmt.Sprintf("Commission|%v", vr.commission))
+	vals = append(vals, fmt.Sprintf("Self Stake|%s", vr.stake))
+	vals = append(vals, fmt.Sprintf("Total Stake|%s", vr.totalStake))
+	vals = append(vals, fmt.Sprintf("Withdrawable Rewards|%s", vr.withdrawableRewards))
+	vals = append(vals, fmt.Sprintf("Commission|%s", vr.commission))
 	vals = append(vals, fmt.Sprintf("Is Active|%v", vr.active))
 
 	buffer.WriteString(helper.FormatKV(vals))

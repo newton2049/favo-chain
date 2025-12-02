@@ -72,8 +72,17 @@ func runCommand(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	// Verify that the target address is provided and that the format is generally correct.
+	if params.addressTo == "" {
+		return fmt.Errorf("withdraw target address must be provided via --%s", addressToFlag)
+	}
+	if len(params.addressTo) < 2 || params.addressTo[:2] != "0x" {
+		return fmt.Errorf("withdraw target address '%s' doesn't look like a hex address", params.addressTo)
+	}
+
+	// The receipt timeout has been increased from 150ms to 15s to avoid false timeouts caused by network/block packaging delays.
 	txRelayer, err := txrelayer.NewTxRelayer(txrelayer.WithIPAddress(params.jsonRPC),
-		txrelayer.WithReceiptTimeout(150*time.Millisecond))
+		txrelayer.WithReceiptTimeout(15*time.Second))
 	if err != nil {
 		return err
 	}
@@ -89,11 +98,17 @@ func runCommand(cmd *cobra.Command, _ []string) error {
 		Input:    encoded,
 		To:       (*ethgo.Address)(&contracts.ValidatorSetContract),
 		GasPrice: sidechainHelper.DefaultGasPrice,
+		// Add a default gas limit (adjustable based on actual gas consumption under the contract).
+		Gas: 300000,
 	}
 
 	receipt, err := txRelayer.SendTransaction(txn, validatorAccount.Ecdsa)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to send withdraw transaction: %w", err)
+	}
+
+	if receipt == nil {
+		return fmt.Errorf("withdraw transaction receipt is nil")
 	}
 
 	if receipt.Status == uint64(types.ReceiptFailed) {
