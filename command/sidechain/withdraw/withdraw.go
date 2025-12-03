@@ -80,6 +80,16 @@ func runCommand(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("withdraw target address '%s' doesn't look like a hex address", params.addressTo)
 	}
 
+	// DEBUG: print available ABI methods and events for ChildValidatorSet (helps confirm ABI correctness)
+	fmt.Printf("DEBUG: ChildValidatorSet ABI methods:\n")
+	for name := range contractsapi.ChildValidatorSet.Abi.Methods {
+		fmt.Printf("  - %s\n", name)
+	}
+	fmt.Printf("DEBUG: ChildValidatorSet ABI events:\n")
+	for name := range contractsapi.ChildValidatorSet.Abi.Events {
+		fmt.Printf("  - %s\n", name)
+	}
+
 	// The receipt timeout has been increased from 150ms to 15s to avoid false timeouts caused by network/block packaging delays.
 	txRelayer, err := txrelayer.NewTxRelayer(txrelayer.WithIPAddress(params.jsonRPC),
 		txrelayer.WithReceiptTimeout(15*time.Second))
@@ -115,7 +125,7 @@ func runCommand(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("withdraw transaction failed on block %d", receipt.BlockNumber)
 	}
 
-	// DEBUG: print summary info to help troubleshooting why event not found
+	// DEBUG: print summary info to help troubleshooting why event not found / amount is zero
 	if len(encoded) >= 4 {
 		fmt.Printf("DEBUG: encoded method id = 0x%x\n", encoded[:4])
 	} else {
