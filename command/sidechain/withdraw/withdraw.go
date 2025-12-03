@@ -115,6 +115,24 @@ func runCommand(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("withdraw transaction failed on block %d", receipt.BlockNumber)
 	}
 
+	// DEBUG: print summary info to help troubleshooting why event not found
+	if len(encoded) >= 4 {
+		fmt.Printf("DEBUG: encoded method id = 0x%x\n", encoded[:4])
+	} else {
+		fmt.Printf("DEBUG: encoded length < 4: %d\n", len(encoded))
+	}
+	fmt.Printf("DEBUG: tx from=%s to=%s receiptStatus=%d blockNumber=%d logsCount=%d\n",
+		validatorAccount.Ecdsa.Address().String(),
+		contracts.ValidatorSetContract.String(),
+		receipt.Status,
+		receipt.BlockNumber,
+		len(receipt.Logs),
+	)
+
+	for i, l := range receipt.Logs {
+		fmt.Printf("DEBUG: log %d address=%s topics=%v data=0x%x\n", i, l.Address.String(), l.Topics, l.Data)
+	}
+
 	result := &withdrawResult{
 		validatorAddress: validatorAccount.Ecdsa.Address().String(),
 	}
@@ -126,12 +144,14 @@ func runCommand(cmd *cobra.Command, _ []string) error {
 
 	for _, log := range receipt.Logs {
 		doesMatch, err := withdrawalEvent.ParseLog(log)
+		// DEBUG: ensure parsing errors are surfaced rather than silently ignored
+		if err != nil {
+			// print parsing error for debugging, then return it to fail fast.
+			fmt.Printf("DEBUG: ParseLog returned error: %v\n", err)
+			return err
+		}
 		if !doesMatch {
 			continue
-		}
-
-		if err != nil {
-			return err
 		}
 
 		result.amount = withdrawalEvent.Amount.Uint64()
@@ -142,7 +162,8 @@ func runCommand(cmd *cobra.Command, _ []string) error {
 	}
 
 	if !foundLog {
-		return fmt.Errorf("could not find an appropriate log in receipt that withdrawal happened")
+		// More debug information already printed above (all logs). Provide a helpful error message.
+		return fmt.Errorf("could not find an appropriate log in receipt that withdrawal happened (see DEBUG logs above)")
 	}
 
 	outputter.WriteCommandResult(result)
