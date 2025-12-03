@@ -1,7 +1,10 @@
 package withdraw
 
 import (
+	"encoding/hex"
 	"fmt"
+	"math/big"
+	"strings"
 	"time"
 
 	"github.com/newton2049/favo-chain/command"
@@ -63,6 +66,43 @@ func runPreRun(cmd *cobra.Command, _ []string) error {
 	return params.validateFlags()
 }
 
+// helper: call a view method that returns a uint256-like value (encoded as hex string) and parse to *big.Int
+func callUint256(txRelayer txrelayer.TxRelayer, from ethgo.Address, methodName string, args []interface{}) (*big.Int, error) {
+	m, ok := contractsapi.ChildValidatorSet.Abi.Methods[methodName]
+	if !ok {
+		return nil, fmt.Errorf("method %s not found in ChildValidatorSet ABI", methodName)
+	}
+
+	input, err := m.Encode(args)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode %s args: %w", methodName, err)
+	}
+
+	// convert contracts.ValidatorSetContract (types.Address) to ethgo.Address value
+	toAddr := *(*ethgo.Address)(&contracts.ValidatorSetContract)
+
+	respHex, err := txRelayer.Call(from, toAddr, input)
+	if err != nil {
+		return nil, fmt.Errorf("eth_call %s failed: %w", methodName, err)
+	}
+
+	// normalize response
+	resp := strings.TrimPrefix(respHex, "0x")
+	if resp == "" {
+		return big.NewInt(0), nil
+	}
+
+	// decode hex to bytes
+	b, err := hex.DecodeString(resp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode hex response for %s: %w (rawResp=%s)", methodName, err, respHex)
+	}
+
+	// big-endian uint
+	bi := new(big.Int).SetBytes(b)
+	return bi, nil
+}
+
 func runCommand(cmd *cobra.Command, _ []string) error {
 	outputter := command.InitializeOutputter(cmd)
 	defer outputter.WriteOutput()
@@ -80,6 +120,13 @@ func runCommand(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("withdraw target address '%s' doesn't look like a hex address", params.addressTo)
 	}
 
+	// The receipt timeout has been increased from 150ms to 15s to avoid false timeouts caused by network/block packaging delays.
+	txRelayer, err := txrelayer.NewTxRelayer(txrelayer.WithIPAddress(params.jsonRPC),
+		txrelayer.WithReceiptTimeout(15*time.Second))
+	if err != nil {
+		return err
+	}
+
 	// DEBUG: print available ABI methods and events for ChildValidatorSet (helps confirm ABI correctness)
 	fmt.Printf("DEBUG: ChildValidatorSet ABI methods:\n")
 	for name := range contractsapi.ChildValidatorSet.Abi.Methods {
@@ -90,11 +137,23 @@ func runCommand(cmd *cobra.Command, _ []string) error {
 		fmt.Printf("  - %s\n", name)
 	}
 
-	// The receipt timeout has been increased from 150ms to 15s to avoid false timeouts caused by network/block packaging delays.
-	txRelayer, err := txrelayer.NewTxRelayer(txrelayer.WithIPAddress(params.jsonRPC),
-		txrelayer.WithReceiptTimeout(15*time.Second))
+	// DEBUG: check withdrawable and related values before calling withdraw
+	fromAddr := validatorAccount.Ecdsa.Address()
+	withdrawableBefore, err := callUint256(txRelayer, fromAddr, "withdrawable", []interface{}{fromAddr})
 	if err != nil {
-		return err
+		fmt.Printf("DEBUG: could not read withdrawable before: %v\n", err)
+	} else {
+		fmt.Printf("DEBUG: withdrawable (before) = %s\n", withdrawableBefore.String())
+	}
+
+	// also try getValidatorReward if present
+	if _, ok := contractsapi.ChildValidatorSet.Abi.Methods["getValidatorReward"]; ok {
+		valRewardBefore, err := callUint256(txRelayer, fromAddr, "getValidatorReward", []interface{}{fromAddr})
+		if err != nil {
+			fmt.Printf("DEBUG: getValidatorReward before failed: %v\n", err)
+		} else {
+			fmt.Printf("DEBUG: getValidatorReward (before) = %s\n", valRewardBefore.String())
+		}
 	}
 
 	encoded, err := contractsapi.ChildValidatorSet.Abi.Methods["withdraw"].Encode(
@@ -108,8 +167,8 @@ func runCommand(cmd *cobra.Command, _ []string) error {
 		Input:    encoded,
 		To:       (*ethgo.Address)(&contracts.ValidatorSetContract),
 		GasPrice: sidechainHelper.DefaultGasPrice,
-		// Add a default gas limit (adjustable based on actual gas consumption under the contract).
-		Gas: 300000,
+		// Increase gas for testing to ensure gas is not the limiting factor
+		Gas: 1000000,
 	}
 
 	receipt, err := txRelayer.SendTransaction(txn, validatorAccount.Ecdsa)
@@ -141,6 +200,24 @@ func runCommand(cmd *cobra.Command, _ []string) error {
 
 	for i, l := range receipt.Logs {
 		fmt.Printf("DEBUG: log %d address=%s topics=%v data=0x%x\n", i, l.Address.String(), l.Topics, l.Data)
+	}
+
+	// DEBUG: check withdrawable after calling withdraw
+	withdrawableAfter, err := callUint256(txRelayer, fromAddr, "withdrawable", []interface{}{fromAddr})
+	if err != nil {
+		fmt.Printf("DEBUG: could not read withdrawable after: %v\n", err)
+	} else {
+		fmt.Printf("DEBUG: withdrawable (after) = %s\n", withdrawableAfter.String())
+	}
+
+	// also try getValidatorReward after
+	if _, ok := contractsapi.ChildValidatorSet.Abi.Methods["getValidatorReward"]; ok {
+		valRewardAfter, err := callUint256(txRelayer, fromAddr, "getValidatorReward", []interface{}{fromAddr})
+		if err != nil {
+			fmt.Printf("DEBUG: getValidatorReward after failed: %v\n", err)
+		} else {
+			fmt.Printf("DEBUG: getValidatorReward (after) = %s\n", valRewardAfter.String())
+		}
 	}
 
 	result := &withdrawResult{
