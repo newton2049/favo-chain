@@ -98,24 +98,6 @@ func callUint256(txRelayer txrelayer.TxRelayer, from ethgo.Address, methodName s
 	return new(big.Int).SetBytes(b), nil
 }
 
-// callRaw: call a view method and return the raw hex response string (without decoding)
-func callRaw(txRelayer txrelayer.TxRelayer, from ethgo.Address, methodName string, args []interface{}) (string, error) {
-	m, ok := contractsapi.ChildValidatorSet.Abi.Methods[methodName]
-	if !ok {
-		return "", fmt.Errorf("method %s not found in ChildValidatorSet ABI", methodName)
-	}
-	input, err := m.Encode(args)
-	if err != nil {
-		return "", fmt.Errorf("failed to encode %s args: %w", methodName, err)
-	}
-	toAddr := *(*ethgo.Address)(&contracts.ValidatorSetContract)
-	respHex, err := txRelayer.Call(from, toAddr, input)
-	if err != nil {
-		return "", fmt.Errorf("eth_call %s failed: %w", methodName, err)
-	}
-	return respHex, nil
-}
-
 func runCommand(cmd *cobra.Command, _ []string) error {
 	outputter := command.InitializeOutputter(cmd)
 	defer outputter.WriteOutput()
@@ -125,7 +107,7 @@ func runCommand(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	// Verify that the target address is provided and that the format is generally correct.
+	// Validate target address parameter format
 	if params.addressTo == "" {
 		return fmt.Errorf("withdraw target address must be provided via --%s", addressToFlag)
 	}
@@ -133,82 +115,41 @@ func runCommand(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("withdraw target address '%s' doesn't look like a hex address", params.addressTo)
 	}
 
-	// The receipt timeout has been increased from 150ms to 15s to avoid false timeouts caused by network/block packaging delays.
 	txRelayer, err := txrelayer.NewTxRelayer(txrelayer.WithIPAddress(params.jsonRPC),
 		txrelayer.WithReceiptTimeout(15*time.Second))
 	if err != nil {
 		return err
 	}
 
-	// DEBUG: print available ABI methods and events for ChildValidatorSet
-	fmt.Printf("DEBUG: ChildValidatorSet ABI methods:\n")
-	for name := range contractsapi.ChildValidatorSet.Abi.Methods {
-		fmt.Printf("  - %s\n", name)
-	}
-	fmt.Printf("DEBUG: ChildValidatorSet ABI events:\n")
-	for name := range contractsapi.ChildValidatorSet.Abi.Events {
-		fmt.Printf("  - %s\n", name)
-	}
-
 	fromAddr := validatorAccount.Ecdsa.Address()
 
-	// DEBUG: check withdrawable and related values before calling withdraw
-	withdrawableBefore, err := callUint256(txRelayer, fromAddr, "withdrawable", []interface{}{fromAddr})
+	// Read withdrawable and getValidatorReward values before any action
+	withdrawable, err := callUint256(txRelayer, fromAddr, "withdrawable", []interface{}{fromAddr})
 	if err != nil {
-		fmt.Printf("DEBUG: could not read withdrawable before: %v\n", err)
-	} else {
-		fmt.Printf("DEBUG: withdrawable (before) = %s\n", withdrawableBefore.String())
+		// If the call fails, print a debug message but continue
+		fmt.Printf("DEBUG: failed to read withdrawable: %v\n", err)
 	}
-
-	var valRewardBefore *big.Int
+	valReward := big.NewInt(0)
 	if _, ok := contractsapi.ChildValidatorSet.Abi.Methods["getValidatorReward"]; ok {
-		valRewardBefore, err = callUint256(txRelayer, fromAddr, "getValidatorReward", []interface{}{fromAddr})
-		if err != nil {
-			fmt.Printf("DEBUG: getValidatorReward before failed: %v\n", err)
+		v, err := callUint256(txRelayer, fromAddr, "getValidatorReward", []interface{}{fromAddr})
+		if err == nil {
+			valReward = v
 		} else {
-			fmt.Printf("DEBUG: getValidatorReward (before) = %s\n", valRewardBefore.String())
+			fmt.Printf("DEBUG: failed to read getValidatorReward: %v\n", err)
 		}
 	}
 
-	// DEBUG: print withdraw method info (safe print without accessing Inputs directly)
-	if m, ok := contractsapi.ChildValidatorSet.Abi.Methods["withdraw"]; ok {
-		fmt.Printf("DEBUG: ABI withdraw method = %+v\n", m)
-	} else {
-		fmt.Printf("DEBUG: withdraw method not found in ABI\n")
-	}
+	fmt.Printf("DEBUG: withdrawable=%s getValidatorReward=%s\n", withdrawable.String(), valReward.String())
 
-	if ev, ok := contractsapi.ChildValidatorSet.Abi.Events["Withdrawal"]; ok {
-		// Event ID / topic0 as hex
-		fmt.Printf("DEBUG: ABI Withdrawal event topic0 = 0x%x\n", ev.ID())
-	} else {
-		fmt.Printf("DEBUG: Withdrawal event not found in ABI\n")
-	}
-
-	// DEBUG: pendingWithdrawals raw entries (before) for indices 0..4
-	if _, ok := contractsapi.ChildValidatorSet.Abi.Methods["pendingWithdrawals"]; ok {
-		fmt.Printf("DEBUG: pendingWithdrawals raw entries (before) for indices 0..4:\n")
-		for i := 0; i < 5; i++ {
-			raw, err := callRaw(txRelayer, fromAddr, "pendingWithdrawals", []interface{}{fromAddr, big.NewInt(int64(i))})
-			if err != nil {
-				fmt.Printf("  - idx %d: error: %v\n", i, err)
-				continue
-			}
-			fmt.Printf("  - idx %d: raw=%s\n", i, raw)
-		}
-	} else {
-		fmt.Printf("DEBUG: pendingWithdrawals method not found in ABI\n")
-	}
-
-	// If withdrawable == 0 but getValidatorReward > 0, try to auto-invoke claimValidatorReward
-	// ONLY do this if ABI has claimValidatorReward with 0 inputs (safe heuristic).
-	if withdrawableBefore != nil && withdrawableBefore.Cmp(big.NewInt(0)) == 0 && valRewardBefore != nil && valRewardBefore.Cmp(big.NewInt(0)) > 0 {
+	// If withdrawable is zero but there is an accumulated validator reward,
+	// attempt to call claimValidatorReward() to move/realize that reward so it becomes withdrawable.
+	// This encodes and sends a real transaction that consumes gas.
+	if withdrawable != nil && withdrawable.Cmp(big.NewInt(0)) == 0 && valReward.Cmp(big.NewInt(0)) > 0 {
 		if m, ok := contractsapi.ChildValidatorSet.Abi.Methods["claimValidatorReward"]; ok {
-			// don't access m.Inputs; print method for inspection and only auto-claim if likely zero-arg
-			fmt.Printf("DEBUG: ABI claimValidatorReward = %+v\n", m)
-			// heuristic: if encoding with empty args succeeds, assume zero-arg method
+			// Try to encode with empty args; if encoding fails, skip auto-claim.
 			encClaim, encErr := m.Encode([]interface{}{})
 			if encErr == nil {
-				fmt.Printf("DEBUG: withdrawable=0 and getValidatorReward>0; will attempt to send claimValidatorReward() tx (debug)\n")
+				fmt.Printf("DEBUG: attempting claimValidatorReward() to convert accumulated reward into withdrawable (this sends a tx)\n")
 				claimTxn := &ethgo.Transaction{
 					From:     fromAddr,
 					Input:    encClaim,
@@ -218,22 +159,28 @@ func runCommand(cmd *cobra.Command, _ []string) error {
 				}
 				claimReceipt, err := txRelayer.SendTransaction(claimTxn, validatorAccount.Ecdsa)
 				if err != nil {
-					fmt.Printf("DEBUG: claimValidatorReward tx failed to send: %v\n", err)
+					fmt.Printf("DEBUG: claimValidatorReward tx failed: %v\n", err)
 				} else {
-					fmt.Printf("DEBUG: claimValidatorReward tx receipt status=%d block=%d logsCount=%d\n", claimReceipt.Status, claimReceipt.BlockNumber, len(claimReceipt.Logs))
+					fmt.Printf("DEBUG: claimValidatorReward tx receipt status=%d block=%d logs=%d\n", claimReceipt.Status, claimReceipt.BlockNumber, len(claimReceipt.Logs))
 					for i, l := range claimReceipt.Logs {
 						fmt.Printf("DEBUG: claim log %d address=%s topics=%v data=0x%x\n", i, l.Address.String(), l.Topics, l.Data)
 					}
 				}
+				// Refresh withdrawable after claim
+				w2, err := callUint256(txRelayer, fromAddr, "withdrawable", []interface{}{fromAddr})
+				if err == nil {
+					withdrawable = w2
+					fmt.Printf("DEBUG: withdrawable (after claim) = %s\n", withdrawable.String())
+				}
 			} else {
-				fmt.Printf("DEBUG: claimValidatorReward encode with empty args failed: %v; skipping auto-claim\n", encErr)
+				fmt.Printf("DEBUG: cannot auto-claim: claimValidatorReward encode failed: %v\n", encErr)
 			}
 		} else {
-			fmt.Printf("DEBUG: claimValidatorReward not found in ABI, cannot auto-claim\n")
+			fmt.Printf("DEBUG: claimValidatorReward not available in ABI, cannot auto-claim\n")
 		}
 	}
 
-	// Now encode and send withdraw tx (same as before)
+	// Encode withdraw and send the transaction
 	encoded, err := contractsapi.ChildValidatorSet.Abi.Methods["withdraw"].Encode(
 		[]interface{}{ethgo.HexToAddress(params.addressTo)})
 	if err != nil {
@@ -245,8 +192,7 @@ func runCommand(cmd *cobra.Command, _ []string) error {
 		Input:    encoded,
 		To:       (*ethgo.Address)(&contracts.ValidatorSetContract),
 		GasPrice: sidechainHelper.DefaultGasPrice,
-		// Increase gas for testing
-		Gas: 1000000,
+		Gas:      300000,
 	}
 
 	receipt, err := txRelayer.SendTransaction(txn, validatorAccount.Ecdsa)
@@ -262,60 +208,7 @@ func runCommand(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("withdraw transaction failed on block %d", receipt.BlockNumber)
 	}
 
-	// DEBUG: summary
-	if len(encoded) >= 4 {
-		fmt.Printf("DEBUG: encoded method id = 0x%x\n", encoded[:4])
-	} else {
-		fmt.Printf("DEBUG: encoded length < 4: %d\n", len(encoded))
-	}
-	fmt.Printf("DEBUG: tx from=%s to=%s receiptStatus=%d blockNumber=%d logsCount=%d\n",
-		fromAddr.String(),
-		contracts.ValidatorSetContract.String(),
-		receipt.Status,
-		receipt.BlockNumber,
-		len(receipt.Logs),
-	)
-
-	for i, l := range receipt.Logs {
-		fmt.Printf("DEBUG: log %d address=%s topics=%v data=0x%x\n", i, l.Address.String(), l.Topics, l.Data)
-		// If ABI has Withdrawal event, compare topic0
-		if ev, ok := contractsapi.ChildValidatorSet.Abi.Events["Withdrawal"]; ok {
-			if len(l.Topics) > 0 {
-				fmt.Printf("DEBUG: receipt log topic0 == ABI Withdrawal topic0 ? %v\n", ev.ID().String() == l.Topics[0].String())
-			}
-		}
-	}
-
-	// DEBUG: check withdrawable and getValidatorReward after calling withdraw/claim
-	withdrawableAfter, err := callUint256(txRelayer, fromAddr, "withdrawable", []interface{}{fromAddr})
-	if err != nil {
-		fmt.Printf("DEBUG: could not read withdrawable after: %v\n", err)
-	} else {
-		fmt.Printf("DEBUG: withdrawable (after) = %s\n", withdrawableAfter.String())
-	}
-
-	if _, ok := contractsapi.ChildValidatorSet.Abi.Methods["getValidatorReward"]; ok {
-		valRewardAfter, err := callUint256(txRelayer, fromAddr, "getValidatorReward", []interface{}{fromAddr})
-		if err != nil {
-			fmt.Printf("DEBUG: getValidatorReward after failed: %v\n", err)
-		} else {
-			fmt.Printf("DEBUG: getValidatorReward (after) = %s\n", valRewardAfter.String())
-		}
-	}
-
-	// DEBUG: pendingWithdrawals raw entries (after) for indices 0..4
-	if _, ok := contractsapi.ChildValidatorSet.Abi.Methods["pendingWithdrawals"]; ok {
-		fmt.Printf("DEBUG: pendingWithdrawals raw entries (after) for indices 0..4:\n")
-		for i := 0; i < 5; i++ {
-			raw, err := callRaw(txRelayer, fromAddr, "pendingWithdrawals", []interface{}{fromAddr, big.NewInt(int64(i))})
-			if err != nil {
-				fmt.Printf("  - idx %d: error: %v\n", i, err)
-				continue
-			}
-			fmt.Printf("  - idx %d: raw=%s\n", i, raw)
-		}
-	}
-
+	// Parse Withdrawal event from receipt logs
 	result := &withdrawResult{
 		validatorAddress: fromAddr.String(),
 	}
@@ -328,7 +221,6 @@ func runCommand(cmd *cobra.Command, _ []string) error {
 	for _, log := range receipt.Logs {
 		doesMatch, err := withdrawalEvent.ParseLog(log)
 		if err != nil {
-			fmt.Printf("DEBUG: ParseLog returned error: %v\n", err)
 			return err
 		}
 		if !doesMatch {
@@ -338,15 +230,13 @@ func runCommand(cmd *cobra.Command, _ []string) error {
 		result.amount = withdrawalEvent.Amount.Uint64()
 		result.withdrawnTo = withdrawalEvent.To.String()
 		foundLog = true
-
 		break
 	}
 
 	if !foundLog {
-		return fmt.Errorf("could not find an appropriate log in receipt that withdrawal happened (see DEBUG logs above)")
+		return fmt.Errorf("could not find an appropriate log in receipt that withdrawal happened")
 	}
 
 	outputter.WriteCommandResult(result)
-
 	return nil
 }
