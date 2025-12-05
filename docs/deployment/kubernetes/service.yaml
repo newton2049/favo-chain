@@ -1,0 +1,70 @@
+# Headless service for StatefulSet
+apiVersion: v1
+kind: Service
+metadata:
+  name: favo-chain
+  namespace: favo-chain
+  labels:
+    app: favo-chain
+spec:
+  clusterIP: None
+  selector:
+    app: favo-chain
+    component: validator
+  ports:
+    - name: jsonrpc
+      port: 8545
+      targetPort: 8545
+    - name: grpc
+      port: 9632
+      targetPort: 9632
+    - name: libp2p
+      port: 1478
+      targetPort: 1478
+    - name: prometheus
+      port: 5001
+      targetPort: 5001
+
+---
+# LoadBalancer service for external RPC access
+apiVersion: v1
+kind: Service
+metadata:
+  name: favo-chain-rpc
+  namespace: favo-chain
+  labels:
+    app: favo-chain
+  annotations:
+    # AWS-specific annotations (adjust for your cloud provider)
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+spec:
+  type: LoadBalancer
+  selector:
+    app: favo-chain
+    component: validator
+  ports:
+    - name: jsonrpc
+      port: 8545
+      targetPort: 8545
+      protocol: TCP
+
+---
+# ClusterIP service for internal gRPC access
+apiVersion: v1
+kind: Service
+metadata:
+  name: favo-chain-grpc
+  namespace: favo-chain
+  labels:
+    app: favo-chain
+spec:
+  type: ClusterIP
+  selector:
+    app: favo-chain
+    component: validator
+  ports:
+    - name: grpc
+      port: 9632
+      targetPort: 9632
+      protocol: TCP

@@ -1,0 +1,136 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: favo-chain-validator
+  namespace: favo-chain
+  labels:
+    app: favo-chain
+    component: validator
+spec:
+  serviceName: favo-chain
+  replicas: 4
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: favo-chain
+      component: validator
+  template:
+    metadata:
+      labels:
+        app: favo-chain
+        component: validator
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "5001"
+    spec:
+      # Anti-affinity to spread validators across nodes
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - favo-chain
+                topologyKey: "kubernetes.io/hostname"
+      
+      # Security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      
+      containers:
+        - name: favo-chain
+          image: <YOUR_ECR_REGISTRY>/favo-chain:latest
+          imagePullPolicy: Always
+          
+          command:
+            - /usr/local/bin/favo-chain
+          args:
+            - server
+            - --data-dir=/data
+            - --chain=/config/genesis.json
+            - --grpc-address=0.0.0.0:9632
+            - --libp2p=0.0.0.0:1478
+            - --jsonrpc=0.0.0.0:8545
+            - --prometheus=0.0.0.0:5001
+            - --seal
+            - --log-level=$(LOG_LEVEL)
+          
+          env:
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: favo-chain-config
+                  key: LOG_LEVEL
+          
+          ports:
+            - containerPort: 8545
+              name: jsonrpc
+              protocol: TCP
+            - containerPort: 9632
+              name: grpc
+              protocol: TCP
+            - containerPort: 1478
+              name: libp2p
+              protocol: TCP
+            - containerPort: 5001
+              name: prometheus
+              protocol: TCP
+          
+          resources:
+            requests:
+              cpu: "2"
+              memory: "4Gi"
+            limits:
+              cpu: "4"
+              memory: "8Gi"
+          
+          # Health checks
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8545
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8545
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: config
+              mountPath: /config
+              readOnly: true
+      
+      volumes:
+        - name: config
+          configMap:
+            name: favo-chain-genesis
+  
+  # Persistent volume for chain data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app: favo-chain
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: gp3  # Adjust based on your cloud provider
+        resources:
+          requests:
+            storage: 100Gi

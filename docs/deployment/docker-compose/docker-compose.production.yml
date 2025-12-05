@@ -1,0 +1,242 @@
+# Production Docker Compose Configuration (Reference Only)
+# 生产环境 Docker Compose 配置 (仅供参考)
+#
+# ⚠️ WARNING: This configuration is for reference only.
+# For production deployments, use Kubernetes, AWS ECS, or other orchestration platforms.
+#
+# If you must use Docker Compose in production, ensure:
+# 1. Proper secret management (not environment variables)
+# 2. Separate persistent volumes per node
+# 3. Load balancer for RPC endpoints
+# 4. Network isolation
+# 5. Regular backups
+# 6. Monitoring and alerting
+
+version: '3.9'
+
+services:
+  ## Validator Node 1
+  validator-1:
+    image: ${FAVO_CHAIN_IMAGE:-ghcr.io/newton2049/favo-chain:latest}
+    container_name: favo-chain-prod-validator-1
+    command: [
+      "server",
+      "--data-dir", "/data",
+      "--chain", "/config/genesis.json",
+      "--grpc-address", "0.0.0.0:9632",
+      "--libp2p", "0.0.0.0:1478",
+      "--jsonrpc", "0.0.0.0:8545",
+      "--prometheus", "0.0.0.0:5001",
+      "--seal",
+      "--log-level", "WARN"
+    ]
+    ports:
+      - '8545:8545'
+      - '9632:9632'
+      - '1478:1478'
+      - '5001:5001'
+    volumes:
+      - validator-1-data:/data
+      - ./config/genesis.json:/config/genesis.json:ro
+      - ./secrets/validator-1:/secrets:ro
+    networks:
+      - favo-chain-prod
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '2'
+          memory: 4G
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8545"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200m"
+        max-file: "10"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+  ## Validator Node 2
+  validator-2:
+    image: ${FAVO_CHAIN_IMAGE:-ghcr.io/newton2049/favo-chain:latest}
+    container_name: favo-chain-prod-validator-2
+    command: [
+      "server",
+      "--data-dir", "/data",
+      "--chain", "/config/genesis.json",
+      "--grpc-address", "0.0.0.0:9632",
+      "--libp2p", "0.0.0.0:1478",
+      "--jsonrpc", "0.0.0.0:8545",
+      "--prometheus", "0.0.0.0:5001",
+      "--seal",
+      "--log-level", "WARN"
+    ]
+    ports:
+      - '18545:8545'
+      - '19632:9632'
+      - '11478:1478'
+      - '15001:5001'
+    volumes:
+      - validator-2-data:/data
+      - ./config/genesis.json:/config/genesis.json:ro
+      - ./secrets/validator-2:/secrets:ro
+    networks:
+      - favo-chain-prod
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '2'
+          memory: 4G
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8545"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200m"
+        max-file: "10"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+  ## Validator Node 3
+  validator-3:
+    image: ${FAVO_CHAIN_IMAGE:-ghcr.io/newton2049/favo-chain:latest}
+    container_name: favo-chain-prod-validator-3
+    command: [
+      "server",
+      "--data-dir", "/data",
+      "--chain", "/config/genesis.json",
+      "--grpc-address", "0.0.0.0:9632",
+      "--libp2p", "0.0.0.0:1478",
+      "--jsonrpc", "0.0.0.0:8545",
+      "--prometheus", "0.0.0.0:5001",
+      "--seal",
+      "--log-level", "WARN"
+    ]
+    ports:
+      - '28545:8545'
+      - '29632:9632'
+      - '21478:1478'
+      - '25001:5001'
+    volumes:
+      - validator-3-data:/data
+      - ./config/genesis.json:/config/genesis.json:ro
+      - ./secrets/validator-3:/secrets:ro
+    networks:
+      - favo-chain-prod
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '2'
+          memory: 4G
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8545"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200m"
+        max-file: "10"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+  ## Validator Node 4
+  validator-4:
+    image: ${FAVO_CHAIN_IMAGE:-ghcr.io/newton2049/favo-chain:latest}
+    container_name: favo-chain-prod-validator-4
+    command: [
+      "server",
+      "--data-dir", "/data",
+      "--chain", "/config/genesis.json",
+      "--grpc-address", "0.0.0.0:9632",
+      "--libp2p", "0.0.0.0:1478",
+      "--jsonrpc", "0.0.0.0:8545",
+      "--prometheus", "0.0.0.0:5001",
+      "--seal",
+      "--log-level", "WARN"
+    ]
+    ports:
+      - '38545:8545'
+      - '39632:9632'
+      - '31478:1478'
+      - '35001:5001'
+    volumes:
+      - validator-4-data:/data
+      - ./config/genesis.json:/config/genesis.json:ro
+      - ./secrets/validator-4:/secrets:ro
+    networks:
+      - favo-chain-prod
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '2'
+          memory: 4G
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8545"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200m"
+        max-file: "10"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+networks:
+  favo-chain-prod:
+    driver: bridge
+    name: favo-chain-prod
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  validator-1-data:
+    name: favo-chain-prod-validator-1
+    driver: local
+  validator-2-data:
+    name: favo-chain-prod-validator-2
+    driver: local
+  validator-3-data:
+    name: favo-chain-prod-validator-3
+    driver: local
+  validator-4-data:
+    name: favo-chain-prod-validator-4
+    driver: local

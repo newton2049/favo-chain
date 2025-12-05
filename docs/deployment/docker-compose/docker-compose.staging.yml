@@ -1,0 +1,234 @@
+# Staging Docker Compose Configuration
+# 测试环境 Docker Compose 配置
+
+version: '3.9'
+
+services:
+  ## Initialize genesis and secrets for staging
+  init:
+    build:
+      context: ../../../
+      dockerfile: docker/local/Dockerfile
+    image: local/favo-chain:staging
+    container_name: favo-chain-staging-init
+    command: ["init", "${EDGE_CONSENSUS:-ibft}"]
+    volumes:
+      - staging-data:/data
+    networks:
+      - favo-chain-staging
+
+  ## Validator Node 1
+  node-1:
+    image: local/favo-chain:staging
+    container_name: favo-chain-staging-validator-1
+    command: [
+      "server",
+      "--data-dir", "/data/data-1",
+      "--chain", "/data/genesis.json",
+      "--grpc-address", "0.0.0.0:9632",
+      "--libp2p", "0.0.0.0:1478",
+      "--jsonrpc", "0.0.0.0:8545",
+      "--prometheus", "0.0.0.0:5001",
+      "--seal",
+      "--log-level", "INFO"
+    ]
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    ports:
+      - '10000:9632'
+      - '10002:8545'
+      - '10003:5001'
+    volumes:
+      - staging-data:/data
+    networks:
+      - favo-chain-staging
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8545"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  ## Validator Node 2
+  node-2:
+    image: local/favo-chain:staging
+    container_name: favo-chain-staging-validator-2
+    command: [
+      "server",
+      "--data-dir", "/data/data-2",
+      "--chain", "/data/genesis.json",
+      "--grpc-address", "0.0.0.0:9632",
+      "--libp2p", "0.0.0.0:1478",
+      "--jsonrpc", "0.0.0.0:8545",
+      "--prometheus", "0.0.0.0:5001",
+      "--seal",
+      "--log-level", "INFO"
+    ]
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    ports:
+      - '20000:9632'
+      - '20002:8545'
+      - '20003:5001'
+    volumes:
+      - staging-data:/data
+    networks:
+      - favo-chain-staging
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8545"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  ## Validator Node 3
+  node-3:
+    image: local/favo-chain:staging
+    container_name: favo-chain-staging-validator-3
+    command: [
+      "server",
+      "--data-dir", "/data/data-3",
+      "--chain", "/data/genesis.json",
+      "--grpc-address", "0.0.0.0:9632",
+      "--libp2p", "0.0.0.0:1478",
+      "--jsonrpc", "0.0.0.0:8545",
+      "--prometheus", "0.0.0.0:5001",
+      "--seal",
+      "--log-level", "INFO"
+    ]
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    ports:
+      - '30000:9632'
+      - '30002:8545'
+      - '30003:5001'
+    volumes:
+      - staging-data:/data
+    networks:
+      - favo-chain-staging
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8545"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  ## Validator Node 4
+  node-4:
+    image: local/favo-chain:staging
+    container_name: favo-chain-staging-validator-4
+    command: [
+      "server",
+      "--data-dir", "/data/data-4",
+      "--chain", "/data/genesis.json",
+      "--grpc-address", "0.0.0.0:9632",
+      "--libp2p", "0.0.0.0:1478",
+      "--jsonrpc", "0.0.0.0:8545",
+      "--prometheus", "0.0.0.0:5001",
+      "--seal",
+      "--log-level", "INFO"
+    ]
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    ports:
+      - '40000:9632'
+      - '40002:8545'
+      - '40003:5001'
+    volumes:
+      - staging-data:/data
+    networks:
+      - favo-chain-staging
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8545"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  ## Prometheus for metrics collection (optional)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: favo-chain-staging-prometheus
+    ports:
+      - '9090:9090'
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - favo-chain-staging
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+
+networks:
+  favo-chain-staging:
+    driver: bridge
+    name: favo-chain-staging
+
+volumes:
+  staging-data:
+    name: favo-chain-staging-data
+  prometheus-data:
+    name: favo-chain-staging-prometheus

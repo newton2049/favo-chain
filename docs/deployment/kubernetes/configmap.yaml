@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: favo-chain-config
+  namespace: favo-chain
+  labels:
+    app: favo-chain
+data:
+  # Genesis configuration - customize as needed
+  CHAIN_ID: "51000"
+  NETWORK_NAME: "favo-chain-mainnet"
+  BLOCK_GAS_LIMIT: "30000000"
+  EPOCH_SIZE: "1000"
+  LOG_LEVEL: "WARN"
+  NUM_BLOCK_CONFIRMATIONS: "12"
+  MAX_PEERS: "100"
+  
+  # Ports
+  JSONRPC_PORT: "8545"
+  GRPC_PORT: "9632"
+  LIBP2P_PORT: "1478"
+  PROMETHEUS_PORT: "5001"
