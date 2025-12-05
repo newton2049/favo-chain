@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: favo-chain
+  labels:
+    app: favo-chain
+    environment: production

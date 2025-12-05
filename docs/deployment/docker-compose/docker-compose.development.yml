@@ -1,0 +1,147 @@
+# Development Docker Compose Configuration
+# 开发环境 Docker Compose 配置
+
+version: '3.9'
+
+services:
+  ## Initialize genesis and secrets for development
+  init:
+    build:
+      context: ../../../
+      dockerfile: docker/local/Dockerfile
+    image: local/favo-chain:dev
+    container_name: favo-chain-dev-init
+    command: ["init", "${EDGE_CONSENSUS:-ibft}"]
+    volumes:
+      - dev-data:/data
+    networks:
+      - favo-chain-dev
+
+  ## Validator Node 1
+  node-1:
+    image: local/favo-chain:dev
+    container_name: favo-chain-dev-validator-1
+    command: [
+      "server",
+      "--data-dir", "/data/data-1",
+      "--chain", "/data/genesis.json",
+      "--grpc-address", "0.0.0.0:9632",
+      "--libp2p", "0.0.0.0:1478",
+      "--jsonrpc", "0.0.0.0:8545",
+      "--prometheus", "0.0.0.0:5001",
+      "--seal",
+      "--log-level", "DEBUG"
+    ]
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    ports:
+      - '10000:9632'
+      - '10002:8545'
+      - '10003:5001'
+    volumes:
+      - dev-data:/data
+    networks:
+      - favo-chain-dev
+    restart: unless-stopped
+    environment:
+      - LOG_LEVEL=DEBUG
+
+  ## Validator Node 2
+  node-2:
+    image: local/favo-chain:dev
+    container_name: favo-chain-dev-validator-2
+    command: [
+      "server",
+      "--data-dir", "/data/data-2",
+      "--chain", "/data/genesis.json",
+      "--grpc-address", "0.0.0.0:9632",
+      "--libp2p", "0.0.0.0:1478",
+      "--jsonrpc", "0.0.0.0:8545",
+      "--prometheus", "0.0.0.0:5001",
+      "--seal",
+      "--log-level", "DEBUG"
+    ]
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    ports:
+      - '20000:9632'
+      - '20002:8545'
+      - '20003:5001'
+    volumes:
+      - dev-data:/data
+    networks:
+      - favo-chain-dev
+    restart: unless-stopped
+    environment:
+      - LOG_LEVEL=DEBUG
+
+  ## Validator Node 3
+  node-3:
+    image: local/favo-chain:dev
+    container_name: favo-chain-dev-validator-3
+    command: [
+      "server",
+      "--data-dir", "/data/data-3",
+      "--chain", "/data/genesis.json",
+      "--grpc-address", "0.0.0.0:9632",
+      "--libp2p", "0.0.0.0:1478",
+      "--jsonrpc", "0.0.0.0:8545",
+      "--prometheus", "0.0.0.0:5001",
+      "--seal",
+      "--log-level", "DEBUG"
+    ]
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    ports:
+      - '30000:9632'
+      - '30002:8545'
+      - '30003:5001'
+    volumes:
+      - dev-data:/data
+    networks:
+      - favo-chain-dev
+    restart: unless-stopped
+    environment:
+      - LOG_LEVEL=DEBUG
+
+  ## Validator Node 4
+  node-4:
+    image: local/favo-chain:dev
+    container_name: favo-chain-dev-validator-4
+    command: [
+      "server",
+      "--data-dir", "/data/data-4",
+      "--chain", "/data/genesis.json",
+      "--grpc-address", "0.0.0.0:9632",
+      "--libp2p", "0.0.0.0:1478",
+      "--jsonrpc", "0.0.0.0:8545",
+      "--prometheus", "0.0.0.0:5001",
+      "--seal",
+      "--log-level", "DEBUG"
+    ]
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    ports:
+      - '40000:9632'
+      - '40002:8545'
+      - '40003:5001'
+    volumes:
+      - dev-data:/data
+    networks:
+      - favo-chain-dev
+    restart: unless-stopped
+    environment:
+      - LOG_LEVEL=DEBUG
+
+networks:
+  favo-chain-dev:
+    driver: bridge
+    name: favo-chain-dev
+
+volumes:
+  dev-data:
+    name: favo-chain-dev-data
