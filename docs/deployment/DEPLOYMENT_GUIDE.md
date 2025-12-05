@@ -82,7 +82,7 @@ Favo Chain supports three primary environments:
 
 ### Prerequisites
 
-- Go 1.18.x
+- Go 1.20+ (Go 1.21 or later recommended for security and performance)
 - Docker & Docker Compose 2+
 - Node.js & npm (for favobft consensus)
 - Make

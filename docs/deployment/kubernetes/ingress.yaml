@@ -17,10 +17,12 @@ metadata:
     nginx.ingress.kubernetes.io/limit-rps: "100"
     nginx.ingress.kubernetes.io/limit-connections: "50"
     
-    # CORS (if needed for DApp access)
+    # CORS - SECURITY: Restrict to your specific domains in production
+    # Example: nginx.ingress.kubernetes.io/cors-allow-origin: "https://app.favo.network,https://dashboard.favo.network"
     nginx.ingress.kubernetes.io/enable-cors: "true"
     nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, OPTIONS"
-    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+    # WARNING: Do not use '*' in production. Replace with your actual domain(s).
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://app.favo.network"
     
     # For cert-manager TLS
     # cert-manager.io/cluster-issuer: "letsencrypt-prod"

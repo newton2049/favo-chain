@@ -130,7 +130,12 @@ spec:
       spec:
         accessModes:
           - ReadWriteOnce
-        storageClassName: gp3  # Adjust based on your cloud provider
+        # Adjust storageClassName based on your cloud provider:
+        # - AWS EKS: gp3, gp2
+        # - GKE: standard-rwo, premium-rwo
+        # - AKS: managed-premium, managed-csi
+        # - Default: standard (most providers)
+        storageClassName: standard
         resources:
           requests:
             storage: 100Gi
