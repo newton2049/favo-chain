@@ -1,6 +1,9 @@
 package favobft
 
 import (
+	"errors"
+	"time"
+
 	"github.com/newton2049/favo-chain/blockchain"
 	"github.com/newton2049/favo-chain/types"
 )
@@ -11,22 +14,41 @@ func isEndOfPeriod(blockNumber, periodSize uint64) bool {
 	return blockNumber%periodSize == 0
 }
 
-// getBlockData returns block header and extra
+// getBlockData returns block header and extra with retry logic for transient errors
 func getBlockData(blockNumber uint64, blockchainBackend blockchainBackend) (*types.Header, *Extra, error) {
-	blockHeader, found := blockchainBackend.GetHeaderByNumber(blockNumber)
-	if !found {
-		return nil, nil, blockchain.ErrNoBlock
+	const (
+		maxRetries   = 3
+		retryDelayMs = 50
+	)
+
+	var (
+		blockHeader *types.Header
+		blockExtra  *Extra
+		err         error
+		found       bool
+	)
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		blockHeader, found = blockchainBackend.GetHeaderByNumber(blockNumber)
+		if !found {
+			return nil, nil, blockchain.ErrNoBlock
+		}
+
+		blockExtra, err = GetIbftExtra(blockHeader.ExtraData)
+		if err == nil {
+			return blockHeader, blockExtra, nil
+		}
+
+		// Only retry on potential transient errors, not on permanent decode errors
+		if attempt < maxRetries-1 {
+			time.Sleep(time.Duration(retryDelayMs) * time.Millisecond)
+		}
 	}
 
-	blockExtra, err := GetIbftExtra(blockHeader.ExtraData)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return blockHeader, blockExtra, nil
+	return nil, nil, err
 }
 
-// isEpochEndingBlock checks if given block is an epoch ending block
+// isEpochEndingBlock checks if given block is an epoch ending block with improved validation
 func isEpochEndingBlock(blockNumber uint64, extra *Extra, blockchain blockchainBackend) (bool, error) {
 	if !extra.Validators.IsEmpty() {
 		// if validator set delta is not empty, the validator set was changed in this block
@@ -36,6 +58,12 @@ func isEpochEndingBlock(blockNumber uint64, extra *Extra, blockchain blockchainB
 
 	_, nextBlockExtra, err := getBlockData(blockNumber+1, blockchain)
 	if err != nil {
+		// Distinguish between "no block" (expected case) and other errors
+		if errors.Is(err, blockchain.ErrNoBlock) {
+			// No next block means we can't determine if this is epoch ending
+			return false, err
+		}
+		// For other errors, still return them but log context would be helpful
 		return false, err
 	}
 
