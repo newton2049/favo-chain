@@ -31,14 +31,14 @@ func getBlockData(blockNumber uint64, blockchainBackend blockchainBackend) (*typ
 }
 
 // isEpochEndingBlock checks if given block is an epoch ending block with improved validation
-func isEpochEndingBlock(blockNumber uint64, extra *Extra, blockchain blockchainBackend) (bool, error) {
+func isEpochEndingBlock(blockNumber uint64, extra *Extra, blockchainBackend blockchainBackend) (bool, error) {
 	if !extra.Validators.IsEmpty() {
 		// if validator set delta is not empty, the validator set was changed in this block
 		// meaning the epoch changed as well
 		return true, nil
 	}
 
-	_, nextBlockExtra, err := getBlockData(blockNumber+1, blockchain)
+	_, nextBlockExtra, err := getBlockData(blockNumber+1, blockchainBackend)
 	if err != nil {
 		// Distinguish between "no block" (expected case) and other errors
 		if errors.Is(err, blockchain.ErrNoBlock) {
