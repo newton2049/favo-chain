@@ -266,6 +266,7 @@ func (v *validatorsSnapshotCache) cleanup() error {
 
 // getLastCachedSnapshot gets the latest snapshot cached with database consistency priority
 // If it doesn't have snapshot cached for desired epoch, it will return the latest one it has
+// that is <= currentEpoch (never returns a snapshot from a future epoch)
 func (v *validatorsSnapshotCache) getLastCachedSnapshot(currentEpoch uint64) (*validatorSnapshot, error) {
 	// First, always check database for the most recent snapshot to ensure consistency
 	dbSnapshot, err := v.state.EpochStore.getLastSnapshot()
@@ -286,10 +287,11 @@ func (v *validatorsSnapshotCache) getLastCachedSnapshot(currentEpoch uint64) (*v
 	if cachedSnapshot != nil {
 		v.logger.Trace("Found exact epoch in memory cache", "Epoch", currentEpoch)
 		
-		// Verify database consistency - if db has newer data, prefer it
-		if dbSnapshot != nil && dbSnapshot.Epoch > cachedSnapshot.Epoch {
-			v.logger.Debug("Database has newer snapshot, updating cache", 
-				"memoryEpoch", cachedSnapshot.Epoch, "dbEpoch", dbSnapshot.Epoch)
+		// Verify database consistency - if db has the exact same epoch and it's newer, prefer it
+		// Only update if the database snapshot is for the exact epoch requested
+		if dbSnapshot != nil && dbSnapshot.Epoch == currentEpoch {
+			v.logger.Debug("Database has snapshot for exact epoch, updating cache", 
+				"epoch", currentEpoch)
 			cachedSnapshot = dbSnapshot
 			v.snapshots[dbSnapshot.Epoch] = dbSnapshot.copy()
 		}
@@ -313,7 +315,8 @@ func (v *validatorsSnapshotCache) getLastCachedSnapshot(currentEpoch uint64) (*v
 
 	if dbSnapshot != nil {
 		// Prioritize database snapshot: if we do not have any snapshot in memory, 
-		// or db snapshot is newer than the one in memory, return the one from db
+		// or db snapshot is newer than the one in memory
+		// BUT: never return a snapshot from a future epoch (must be <= original currentEpoch)
 		memoryEpoch := uint64(0)
 		if cachedSnapshot != nil {
 			memoryEpoch = cachedSnapshot.Epoch
