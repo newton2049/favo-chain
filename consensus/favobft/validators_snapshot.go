@@ -274,13 +274,12 @@ func (v *validatorsSnapshotCache) getLastCachedSnapshot(currentEpoch uint64) (*v
 		return nil, err
 	}
 
-	v.logger.Trace("Checking for cached snapshot", "requestedEpoch", currentEpoch, "dbSnapshotEpoch", 
-		func() uint64 {
-			if dbSnapshot != nil {
-				return dbSnapshot.Epoch
-			}
-			return 0
-		}())
+	dbEpoch := uint64(0)
+	if dbSnapshot != nil {
+		dbEpoch = dbSnapshot.Epoch
+	}
+
+	v.logger.Trace("Checking for cached snapshot", "requestedEpoch", currentEpoch, "dbSnapshotEpoch", dbEpoch)
 
 	// Check if we have the exact epoch requested in memory
 	cachedSnapshot := v.snapshots[currentEpoch]
@@ -315,15 +314,13 @@ func (v *validatorsSnapshotCache) getLastCachedSnapshot(currentEpoch uint64) (*v
 	if dbSnapshot != nil {
 		// Prioritize database snapshot: if we do not have any snapshot in memory, 
 		// or db snapshot is newer than the one in memory, return the one from db
+		memoryEpoch := uint64(0)
+		if cachedSnapshot != nil {
+			memoryEpoch = cachedSnapshot.Epoch
+		}
+		
 		if cachedSnapshot == nil || dbSnapshot.Epoch > cachedSnapshot.Epoch {
-			v.logger.Debug("Using database snapshot", 
-				"dbEpoch", dbSnapshot.Epoch, 
-				"memoryEpoch", func() uint64 {
-					if cachedSnapshot != nil {
-						return cachedSnapshot.Epoch
-					}
-					return 0
-				}())
+			v.logger.Debug("Using database snapshot", "dbEpoch", dbSnapshot.Epoch, "memoryEpoch", memoryEpoch)
 			cachedSnapshot = dbSnapshot
 			// save it in cache as well for future lookups
 			v.snapshots[dbSnapshot.Epoch] = dbSnapshot.copy()

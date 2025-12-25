@@ -136,6 +136,6 @@ func TestHelpers_getBlockData_InvalidExtra(t *testing.T) {
 	require.Error(t, err)
 	require.Nil(t, header)
 	require.Nil(t, extra)
-	// The retry logic will attempt 3 times but should fail with the same error
-	blockchainMock.AssertNumberOfCalls(t, "GetHeaderByNumber", 3)
+	// Should only be called once (no retry on extra data parsing errors)
+	blockchainMock.AssertNumberOfCalls(t, "GetHeaderByNumber", 1)
 }

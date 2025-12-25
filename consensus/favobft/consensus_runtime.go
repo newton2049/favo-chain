@@ -383,13 +383,12 @@ func (c *consensusRuntime) FSM() error {
 func (c *consensusRuntime) restartEpoch(header *types.Header) (*epochMetadata, error) {
 	lastEpoch := c.epoch
 
-	c.logger.Debug("restartEpoch called", "blockNumber", header.Number, 
-		"lastEpoch", func() uint64 {
-			if lastEpoch != nil {
-				return lastEpoch.Number
-			}
-			return 0
-		}())
+	lastEpochNumber := uint64(0)
+	if lastEpoch != nil {
+		lastEpochNumber = lastEpoch.Number
+	}
+
+	c.logger.Debug("restartEpoch called", "blockNumber", header.Number, "lastEpoch", lastEpochNumber)
 
 	systemState, err := c.getSystemState(header)
 	if err != nil {
@@ -801,17 +800,17 @@ func (c *consensusRuntime) HasQuorum(
 		if err != nil {
 			// This can happen if e.g. node runs sequence on lower height and proposer calculator updated
 			// to a newer count as a consequence of inserting block from syncer
+			currentEpoch := uint64(0)
+			if c.epoch != nil {
+				currentEpoch = c.epoch.Number
+			}
+			
 			c.logger.Debug("HasQuorum has been called but proposer could not be retrieved", 
 				"error", err, 
 				"height", height, 
 				"round", messages[0].View.Round,
 				"messageCount", len(messages),
-				"currentEpoch", func() uint64 {
-					if c.epoch != nil {
-						return c.epoch.Number
-					}
-					return 0
-				}())
+				"currentEpoch", currentEpoch)
 
 			return false
 		}

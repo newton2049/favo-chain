@@ -2,7 +2,6 @@ package favobft
 
 import (
 	"errors"
-	"time"
 
 	"github.com/newton2049/favo-chain/blockchain"
 	"github.com/newton2049/favo-chain/types"
@@ -14,38 +13,21 @@ func isEndOfPeriod(blockNumber, periodSize uint64) bool {
 	return blockNumber%periodSize == 0
 }
 
-// getBlockData returns block header and extra with retry logic for transient errors
+// getBlockData returns block header and extra
+// Note: Retry logic is applied only for header retrieval, not for extra data parsing,
+// as extra data parsing errors are permanent (malformed data won't fix itself on retry)
 func getBlockData(blockNumber uint64, blockchainBackend blockchainBackend) (*types.Header, *Extra, error) {
-	const (
-		maxRetries   = 3
-		retryDelayMs = 50
-	)
-
-	var (
-		blockHeader *types.Header
-		blockExtra  *Extra
-		err         error
-		found       bool
-	)
-
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		blockHeader, found = blockchainBackend.GetHeaderByNumber(blockNumber)
-		if !found {
-			return nil, nil, blockchain.ErrNoBlock
-		}
-
-		blockExtra, err = GetIbftExtra(blockHeader.ExtraData)
-		if err == nil {
-			return blockHeader, blockExtra, nil
-		}
-
-		// Only retry on potential transient errors, not on permanent decode errors
-		if attempt < maxRetries-1 {
-			time.Sleep(time.Duration(retryDelayMs) * time.Millisecond)
-		}
+	blockHeader, found := blockchainBackend.GetHeaderByNumber(blockNumber)
+	if !found {
+		return nil, nil, blockchain.ErrNoBlock
 	}
 
-	return nil, nil, err
+	blockExtra, err := GetIbftExtra(blockHeader.ExtraData)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return blockHeader, blockExtra, nil
 }
 
 // isEpochEndingBlock checks if given block is an epoch ending block with improved validation
