@@ -85,3 +85,57 @@ func TestHelpers_isEpochEndingBlock_EpochsAreTheSame(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, isEndOfEpoch)
 }
+
+func TestHelpers_getBlockData_Success(t *testing.T) {
+	t.Parallel()
+
+	blockchainMock := new(blockchainMock)
+
+	extra := &Extra{Checkpoint: &CheckpointData{EpochNumber: 2}, Validators: &ValidatorSetDelta{}}
+	block := &types.Header{
+		Number:    10,
+		ExtraData: append(make([]byte, ExtraVanity), extra.MarshalRLPTo(nil)...),
+	}
+
+	blockchainMock.On("GetHeaderByNumber", uint64(10)).Return(block, true)
+
+	header, blockExtra, err := getBlockData(10, blockchainMock)
+	require.NoError(t, err)
+	require.NotNil(t, header)
+	require.NotNil(t, blockExtra)
+	require.Equal(t, uint64(10), header.Number)
+	require.Equal(t, uint64(2), blockExtra.Checkpoint.EpochNumber)
+}
+
+func TestHelpers_getBlockData_NoBlock(t *testing.T) {
+	t.Parallel()
+
+	blockchainMock := new(blockchainMock)
+	blockchainMock.On("GetHeaderByNumber", uint64(10)).Return(&types.Header{}, false)
+
+	header, extra, err := getBlockData(10, blockchainMock)
+	require.ErrorIs(t, err, blockchain.ErrNoBlock)
+	require.Nil(t, header)
+	require.Nil(t, extra)
+}
+
+func TestHelpers_getBlockData_InvalidExtra(t *testing.T) {
+	t.Parallel()
+
+	blockchainMock := new(blockchainMock)
+
+	// Create a block with invalid extra data
+	block := &types.Header{
+		Number:    10,
+		ExtraData: []byte{0x1, 0x2}, // Invalid extra data
+	}
+
+	blockchainMock.On("GetHeaderByNumber", uint64(10)).Return(block, true)
+
+	header, extra, err := getBlockData(10, blockchainMock)
+	require.Error(t, err)
+	require.Nil(t, header)
+	require.Nil(t, extra)
+	// Should only be called once (no retry on extra data parsing errors)
+	blockchainMock.AssertNumberOfCalls(t, "GetHeaderByNumber", 1)
+}

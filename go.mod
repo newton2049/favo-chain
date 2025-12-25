@@ -61,9 +61,9 @@ require (
 )
 
 require (
-	github.com/newton2049/go-ibft-main v0.4.0
 	github.com/docker/docker v20.10.18+incompatible
 	github.com/docker/go-connections v0.4.0
+	github.com/newton2049/go-ibft-main v0.4.0
 	go.etcd.io/bbolt v1.3.6
 )
 

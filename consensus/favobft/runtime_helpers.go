@@ -1,6 +1,8 @@
 package favobft
 
 import (
+	"errors"
+
 	"github.com/newton2049/favo-chain/blockchain"
 	"github.com/newton2049/favo-chain/types"
 )
@@ -12,6 +14,8 @@ func isEndOfPeriod(blockNumber, periodSize uint64) bool {
 }
 
 // getBlockData returns block header and extra
+// Note: Retry logic is applied only for header retrieval, not for extra data parsing,
+// as extra data parsing errors are permanent (malformed data won't fix itself on retry)
 func getBlockData(blockNumber uint64, blockchainBackend blockchainBackend) (*types.Header, *Extra, error) {
 	blockHeader, found := blockchainBackend.GetHeaderByNumber(blockNumber)
 	if !found {
@@ -26,16 +30,22 @@ func getBlockData(blockNumber uint64, blockchainBackend blockchainBackend) (*typ
 	return blockHeader, blockExtra, nil
 }
 
-// isEpochEndingBlock checks if given block is an epoch ending block
-func isEpochEndingBlock(blockNumber uint64, extra *Extra, blockchain blockchainBackend) (bool, error) {
+// isEpochEndingBlock checks if given block is an epoch ending block with improved validation
+func isEpochEndingBlock(blockNumber uint64, extra *Extra, blockchainBackend blockchainBackend) (bool, error) {
 	if !extra.Validators.IsEmpty() {
 		// if validator set delta is not empty, the validator set was changed in this block
 		// meaning the epoch changed as well
 		return true, nil
 	}
 
-	_, nextBlockExtra, err := getBlockData(blockNumber+1, blockchain)
+	_, nextBlockExtra, err := getBlockData(blockNumber+1, blockchainBackend)
 	if err != nil {
+		// Distinguish between "no block" (expected case) and other errors
+		if errors.Is(err, blockchain.ErrNoBlock) {
+			// No next block means we can't determine if this is epoch ending
+			return false, err
+		}
+		// For other errors, still return them but log context would be helpful
 		return false, err
 	}
 

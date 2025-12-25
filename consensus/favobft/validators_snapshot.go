@@ -53,8 +53,11 @@ func (v *validatorsSnapshotCache) GetSnapshot(blockNumber uint64, parents []*typ
 	v.lock.Lock()
 	defer v.lock.Unlock()
 
+	v.logger.Trace("GetSnapshot called", "blockNumber", blockNumber)
+
 	_, extra, err := getBlockData(blockNumber, v.blockchain)
 	if err != nil {
+		v.logger.Error("Failed to get block data in GetSnapshot", "blockNumber", blockNumber, "error", err)
 		return nil, err
 	}
 
@@ -63,6 +66,7 @@ func (v *validatorsSnapshotCache) GetSnapshot(blockNumber uint64, parents []*typ
 		// if there is no block after given block, we assume its not epoch ending block
 		// but, it's a regular use case, and we should not stop the snapshot calculation
 		// because there are cases we need the snapshot for the latest block in chain
+		v.logger.Error("Error checking if epoch ending block", "blockNumber", blockNumber, "error", err)
 		return nil, err
 	}
 
@@ -71,21 +75,25 @@ func (v *validatorsSnapshotCache) GetSnapshot(blockNumber uint64, parents []*typ
 		epochToGetSnapshot--
 	}
 
-	v.logger.Trace("Retrieving snapshot started...", "Block", blockNumber, "Epoch", epochToGetSnapshot)
+	v.logger.Trace("Retrieving snapshot started...", "Block", blockNumber, "Epoch", epochToGetSnapshot, 
+		"isEpochEndingBlock", isEpochEndingBlock)
 
 	latestValidatorSnapshot, err := v.getLastCachedSnapshot(epochToGetSnapshot)
 	if err != nil {
+		v.logger.Error("Failed to get last cached snapshot", "epoch", epochToGetSnapshot, "error", err)
 		return nil, err
 	}
 
 	if latestValidatorSnapshot != nil && latestValidatorSnapshot.Epoch == epochToGetSnapshot {
 		// we have snapshot for required block (epoch) in cache
+		v.logger.Debug("Snapshot found in cache for requested epoch", "epoch", epochToGetSnapshot)
 		return latestValidatorSnapshot.Snapshot, nil
 	}
 
 	if latestValidatorSnapshot == nil {
 		// Haven't managed to retrieve snapshot for any epoch from the cache.
 		// Build snapshot from the scratch, by applying delta from the genesis block.
+		v.logger.Debug("No cached snapshot found, building from genesis")
 		genesisBlockSnapshot, err := v.computeSnapshot(nil, 0, parents)
 		if err != nil {
 			return nil, fmt.Errorf("failed to compute snapshot for epoch 0: %w", err)
@@ -109,6 +117,9 @@ func (v *validatorsSnapshotCache) GetSnapshot(blockNumber uint64, parents []*typ
 	for latestValidatorSnapshot.Epoch < epochToGetSnapshot {
 		nextEpochEndBlockNumber, err := v.getNextEpochEndingBlock(latestValidatorSnapshot.EpochEndingBlock)
 		if err != nil {
+			v.logger.Error("Failed to get next epoch ending block", 
+				"currentEpochEndBlock", latestValidatorSnapshot.EpochEndingBlock, 
+				"targetEpoch", latestValidatorSnapshot.Epoch+1, "error", err)
 			return nil, fmt.Errorf("failed to get the epoch ending block for epoch: %d. Error: %w",
 				latestValidatorSnapshot.Epoch+1, err)
 		}
@@ -117,11 +128,14 @@ func (v *validatorsSnapshotCache) GetSnapshot(blockNumber uint64, parents []*typ
 
 		intermediateSnapshot, err := v.computeSnapshot(latestValidatorSnapshot, nextEpochEndBlockNumber, parents)
 		if err != nil {
+			v.logger.Error("Failed to compute snapshot", "epoch", latestValidatorSnapshot.Epoch+1, 
+				"blockNumber", nextEpochEndBlockNumber, "error", err)
 			return nil, fmt.Errorf("failed to compute snapshot for epoch %d: %w", latestValidatorSnapshot.Epoch+1, err)
 		}
 
 		latestValidatorSnapshot = intermediateSnapshot
 		if err = v.storeSnapshot(latestValidatorSnapshot); err != nil {
+			v.logger.Error("Failed to store snapshot", "epoch", latestValidatorSnapshot.Epoch, "error", err)
 			return nil, fmt.Errorf("failed to store validators snapshot for epoch %d: %w", latestValidatorSnapshot.Epoch, err)
 		}
 
@@ -250,11 +264,38 @@ func (v *validatorsSnapshotCache) cleanup() error {
 	return nil
 }
 
-// getLastCachedSnapshot gets the latest snapshot cached
+// getLastCachedSnapshot gets the latest snapshot cached with database consistency priority
 // If it doesn't have snapshot cached for desired epoch, it will return the latest one it has
+// that is <= currentEpoch (never returns a snapshot from a future epoch)
 func (v *validatorsSnapshotCache) getLastCachedSnapshot(currentEpoch uint64) (*validatorSnapshot, error) {
+	// First, always check database for the most recent snapshot to ensure consistency
+	dbSnapshot, err := v.state.EpochStore.getLastSnapshot()
+	if err != nil {
+		v.logger.Error("Failed to get last snapshot from database", "error", err)
+		return nil, err
+	}
+
+	dbEpoch := uint64(0)
+	if dbSnapshot != nil {
+		dbEpoch = dbSnapshot.Epoch
+	}
+
+	v.logger.Trace("Checking for cached snapshot", "requestedEpoch", currentEpoch, "dbSnapshotEpoch", dbEpoch)
+
+	// Check if we have the exact epoch requested in memory
 	cachedSnapshot := v.snapshots[currentEpoch]
 	if cachedSnapshot != nil {
+		v.logger.Trace("Found exact epoch in memory cache", "Epoch", currentEpoch)
+		
+		// Verify database consistency - if db has the exact same epoch and it's newer, prefer it
+		// Only update if the database snapshot is for the exact epoch requested
+		if dbSnapshot != nil && dbSnapshot.Epoch == currentEpoch {
+			v.logger.Debug("Database has snapshot for exact epoch, updating cache", 
+				"epoch", currentEpoch)
+			cachedSnapshot = dbSnapshot
+			v.snapshots[dbSnapshot.Epoch] = dbSnapshot.copy()
+		}
+		
 		return cachedSnapshot, nil
 	}
 
@@ -272,19 +313,25 @@ func (v *validatorsSnapshotCache) getLastCachedSnapshot(currentEpoch uint64) (*v
 		}
 	}
 
-	dbSnapshot, err := v.state.EpochStore.getLastSnapshot()
-	if err != nil {
-		return nil, err
-	}
-
 	if dbSnapshot != nil {
-		// if we do not have any snapshot in memory, or db snapshot is newer than the one in memory
-		// return the one from db
+		// Prioritize database snapshot: if we do not have any snapshot in memory, 
+		// or db snapshot is newer than the one in memory
+		// BUT: never return a snapshot from a future epoch (must be <= original currentEpoch)
+		memoryEpoch := uint64(0)
+		if cachedSnapshot != nil {
+			memoryEpoch = cachedSnapshot.Epoch
+		}
+		
 		if cachedSnapshot == nil || dbSnapshot.Epoch > cachedSnapshot.Epoch {
+			v.logger.Debug("Using database snapshot", "dbEpoch", dbSnapshot.Epoch, "memoryEpoch", memoryEpoch)
 			cachedSnapshot = dbSnapshot
-			// save it in cache as well, since it doesn't exist
+			// save it in cache as well for future lookups
 			v.snapshots[dbSnapshot.Epoch] = dbSnapshot.copy()
 		}
+	}
+
+	if cachedSnapshot == nil {
+		v.logger.Trace("No cached snapshot found, will build from scratch")
 	}
 
 	return cachedSnapshot, nil

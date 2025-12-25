@@ -383,13 +383,22 @@ func (c *consensusRuntime) FSM() error {
 func (c *consensusRuntime) restartEpoch(header *types.Header) (*epochMetadata, error) {
 	lastEpoch := c.epoch
 
+	lastEpochNumber := uint64(0)
+	if lastEpoch != nil {
+		lastEpochNumber = lastEpoch.Number
+	}
+
+	c.logger.Debug("restartEpoch called", "blockNumber", header.Number, "lastEpoch", lastEpochNumber)
+
 	systemState, err := c.getSystemState(header)
 	if err != nil {
+		c.logger.Error("Failed to get system state in restartEpoch", "blockNumber", header.Number, "error", err)
 		return nil, fmt.Errorf("get system state: %w", err)
 	}
 
 	epochNumber, err := systemState.GetEpoch()
 	if err != nil {
+		c.logger.Error("Failed to get epoch number from system state", "blockNumber", header.Number, "error", err)
 		return nil, fmt.Errorf("get epoch: %w", err)
 	}
 
@@ -397,12 +406,15 @@ func (c *consensusRuntime) restartEpoch(header *types.Header) (*epochMetadata, e
 		// Epoch might be already in memory, if its the same number do nothing -> just return provided last one
 		// Otherwise, reset the epoch metadata and restart the async services
 		if lastEpoch.Number == epochNumber {
+			c.logger.Trace("Epoch unchanged, skipping restart", "epochNumber", epochNumber)
 			return lastEpoch, nil
 		}
+		c.logger.Info("Epoch transition detected", "fromEpoch", lastEpoch.Number, "toEpoch", epochNumber)
 	}
 
 	validatorSet, err := c.config.favobftBackend.GetValidators(header.Number, nil)
 	if err != nil {
+		c.logger.Error("Failed to get validators in restartEpoch", "blockNumber", header.Number, "error", err)
 		return nil, fmt.Errorf("restart epoch - cannot get validators: %w", err)
 	}
 
@@ -413,14 +425,21 @@ func (c *consensusRuntime) restartEpoch(header *types.Header) (*epochMetadata, e
 
 	firstBlockInEpoch, err := c.getFirstBlockOfEpoch(epochNumber, header)
 	if err != nil {
+		c.logger.Error("Failed to get first block of epoch", "epochNumber", epochNumber, "error", err)
 		return nil, err
 	}
 
+	// Database operations with improved error handling and logging
+	// First clean old epochs, then insert new one to prevent database residue
+	c.logger.Debug("Cleaning old epochs from database", "newEpoch", epochNumber)
 	if err := c.state.EpochStore.cleanEpochsFromDB(); err != nil {
-		c.logger.Error("Could not clean previous epochs from db.", "error", err)
+		c.logger.Error("Could not clean previous epochs from db", "newEpoch", epochNumber, "error", err)
+		// Continue despite cleanup error, as insert is more critical
 	}
 
+	c.logger.Debug("Inserting new epoch into database", "epoch", epochNumber)
 	if err := c.state.EpochStore.insertEpoch(epochNumber); err != nil {
+		c.logger.Error("Failed to insert epoch in database", "epoch", epochNumber, "error", err)
 		return nil, fmt.Errorf("an error occurred while inserting new epoch in db. Reason: %w", err)
 	}
 
@@ -439,9 +458,13 @@ func (c *consensusRuntime) restartEpoch(header *types.Header) (*epochMetadata, e
 		ValidatorSet:      NewValidatorSet(validatorSet, c.logger),
 	}
 
+	c.logger.Debug("Posting epoch to state sync manager", "epoch", epochNumber)
 	if err := c.stateSyncManager.PostEpoch(reqObj); err != nil {
+		c.logger.Error("Failed to post epoch to state sync manager", "epoch", epochNumber, "error", err)
 		return nil, err
 	}
+
+	c.logger.Debug("Epoch restart completed successfully", "epoch", epochNumber)
 
 	return &epochMetadata{
 		Number:            epochNumber,
@@ -460,9 +483,16 @@ func (c *consensusRuntime) calculateCommitEpochInput(
 	epochID := epoch.Number
 	totalBlocks := int64(0)
 
+	c.logger.Debug("Calculating commit epoch input", 
+		"currentBlock", currentBlock.Number,
+		"epoch", epochID,
+		"firstBlockInEpoch", epoch.FirstBlockInEpoch)
+
 	getSealersForBlock := func(blockExtra *Extra, validators AccountSet) error {
 		signers, err := validators.GetFilteredValidators(blockExtra.Parent.Bitmap)
 		if err != nil {
+			c.logger.Error("Failed to get filtered validators", 
+				"blockNumber", blockHeader.Number, "error", err)
 			return err
 		}
 
@@ -477,6 +507,8 @@ func (c *consensusRuntime) calculateCommitEpochInput(
 
 	blockExtra, err := GetIbftExtra(currentBlock.ExtraData)
 	if err != nil {
+		c.logger.Error("Failed to get IBFT extra from current block", 
+			"blockNumber", currentBlock.Number, "error", err)
 		return nil, err
 	}
 
@@ -488,6 +520,8 @@ func (c *consensusRuntime) calculateCommitEpochInput(
 
 		blockHeader, blockExtra, err = getBlockData(blockHeader.Number-1, c.config.blockchain)
 		if err != nil {
+			c.logger.Error("Failed to get block data during uptime calculation", 
+				"blockNumber", blockHeader.Number-1, "error", err)
 			return nil, err
 		}
 	}
@@ -498,6 +532,8 @@ func (c *consensusRuntime) calculateCommitEpochInput(
 		for i := 0; i < commitEpochLookbackSize; i++ {
 			validators, err := c.config.favobftBackend.GetValidators(blockHeader.Number-2, nil)
 			if err != nil {
+				c.logger.Error("Failed to get validators during lookback", 
+					"blockNumber", blockHeader.Number-2, "lookbackIndex", i, "error", err)
 				return nil, err
 			}
 
@@ -507,6 +543,8 @@ func (c *consensusRuntime) calculateCommitEpochInput(
 
 			blockHeader, blockExtra, err = getBlockData(blockHeader.Number-1, c.config.blockchain)
 			if err != nil {
+				c.logger.Error("Failed to get block data during lookback", 
+					"blockNumber", blockHeader.Number-1, "lookbackIndex", i, "error", err)
 				return nil, err
 			}
 		}
@@ -541,6 +579,11 @@ func (c *consensusRuntime) calculateCommitEpochInput(
 		},
 		Uptime: uptime,
 	}
+
+	c.logger.Debug("Commit epoch input calculated", 
+		"epochID", epochID, 
+		"totalBlocks", totalBlocks,
+		"uniqueValidators", len(uptimeCounter))
 
 	return commitEpoch, nil
 }
@@ -757,13 +800,26 @@ func (c *consensusRuntime) HasQuorum(
 		if err != nil {
 			// This can happen if e.g. node runs sequence on lower height and proposer calculator updated
 			// to a newer count as a consequence of inserting block from syncer
-			c.logger.Debug("HasQuorum has been called but proposer could not be retrieved", "error", err)
+			currentEpoch := uint64(0)
+			if c.epoch != nil {
+				currentEpoch = c.epoch.Number
+			}
+			
+			c.logger.Debug("HasQuorum has been called but proposer could not be retrieved", 
+				"error", err, 
+				"height", height, 
+				"round", messages[0].View.Round,
+				"messageCount", len(messages),
+				"currentEpoch", currentEpoch)
 
 			return false
 		}
 
 		if _, ok := signers[propAddress]; ok {
-			c.logger.Warn("HasQuorum failed - proposer is among signers but it is not expected to be")
+			c.logger.Warn("HasQuorum failed - proposer is among signers but it is not expected to be",
+				"proposer", propAddress,
+				"height", height,
+				"round", messages[0].View.Round)
 
 			return false
 		}

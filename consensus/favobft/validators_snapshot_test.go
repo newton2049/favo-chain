@@ -295,3 +295,52 @@ func (c *testValidatorsCache) cleanValidatorsCache() error {
 
 	return c.state.EpochStore.removeAllValidatorSnapshots()
 }
+
+func TestValidatorsSnapshotCache_GetLastCachedSnapshot_DatabasePriority(t *testing.T) {
+	t.Parallel()
+	require := require.New(t)
+
+	const (
+		totalValidators = 6
+	)
+
+	allValidators := newTestValidators(t, totalValidators).getPublicIdentities()
+	epochOneValidators := allValidators[:3]
+	epochTwoValidators := allValidators[3:]
+
+	blockchainMock := new(blockchainMock)
+
+	testValidatorsCache := &testValidatorsCache{
+		validatorsSnapshotCache: newValidatorsSnapshotCache(hclog.NewNullLogger(), newTestState(t), blockchainMock),
+	}
+
+	// Store epoch 1 snapshot in database
+	require.NoError(testValidatorsCache.state.EpochStore.insertValidatorSnapshot(&validatorSnapshot{1, 10, epochOneValidators}))
+
+	// Store stale epoch 0 snapshot in memory cache
+	testValidatorsCache.snapshots[0] = &validatorSnapshot{0, 0, allValidators}
+
+	// Get snapshot - should prioritize database over memory
+	snapshot, err := testValidatorsCache.getLastCachedSnapshot(1)
+	require.NoError(err)
+	require.NotNil(snapshot)
+	require.Equal(uint64(1), snapshot.Epoch)
+	require.Equal(epochOneValidators, snapshot.Snapshot)
+
+	// Test when database has newer snapshot than memory
+	require.NoError(testValidatorsCache.state.EpochStore.insertValidatorSnapshot(&validatorSnapshot{2, 20, epochTwoValidators}))
+
+	// Memory has epoch 1, but database has epoch 2
+	testValidatorsCache.snapshots[1] = &validatorSnapshot{1, 10, epochOneValidators}
+
+	snapshot, err = testValidatorsCache.getLastCachedSnapshot(2)
+	require.NoError(err)
+	require.NotNil(snapshot)
+	require.Equal(uint64(2), snapshot.Epoch, "Should return database snapshot which is newer")
+	require.Equal(epochTwoValidators, snapshot.Snapshot)
+
+	// Verify the newer snapshot was cached in memory
+	cachedSnapshot := testValidatorsCache.snapshots[2]
+	require.NotNil(cachedSnapshot)
+	require.Equal(uint64(2), cachedSnapshot.Epoch)
+}
